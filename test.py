@@ -3631,7 +3631,7 @@ class LoginApp:
 
         def worker() -> None:
             try:
-                status, msg = check_and_apply_update(root_dir, url)
+                status, msg = check_and_apply_update(url)
                 self.root.after(0, lambda: self._check_update_ui_done(status, msg))
             except Exception as e:
                 self.root.after(0, lambda: self._check_update_ui_done("error", str(e)))

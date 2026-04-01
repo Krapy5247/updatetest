@@ -20,8 +20,10 @@ import re
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 from typing import Any
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 try:
     import requests
@@ -187,13 +189,29 @@ def read_local_version(root: Path | None = None) -> str:
         return "0.0.0"
 
 
+def _manifest_url_with_cache_bust(url: str) -> str:
+    """raw.githubusercontent.com 等 CDN 會快取同一 URL；加查詢參數強制取最新 manifest。"""
+    parts = urlsplit(url.strip())
+    if not parts.scheme or not parts.netloc:
+        return url
+    q = [(k, v) for k, v in parse_qsl(parts.query, keep_blank_values=True) if k != "_cb"]
+    q.append(("_cb", str(int(time.time()))))
+    new_query = urlencode(q)
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, new_query, parts.fragment))
+
+
 def fetch_manifest(url: str) -> dict[str, Any] | None:
     if requests is None:
         print("[更新] 請先安裝：pip install requests", file=sys.stderr)
         return None
     try:
+        bust = _manifest_url_with_cache_bust(url)
         # 縮短逾時，避免 windowed 下長時間無視窗像當機
-        r = requests.get(url, timeout=(5, 12))
+        r = requests.get(
+            bust,
+            timeout=(5, 12),
+            headers={"Cache-Control": "no-cache", "Pragma": "no-cache"},
+        )
         r.raise_for_status()
         data = r.json()
         return data if isinstance(data, dict) else None
@@ -447,7 +465,8 @@ def check_and_apply_update(manifest_url: str) -> tuple[str, str]:
         return ("error", "清單缺少 version")
 
     if not version_less(local_ver, remote_ver):
-        return ("latest", local_ver)
+        # 僅當「遠端 version 大於本地」才會更新；兩者相同也會回傳 latest
+        return ("latest", f"{local_ver} (遠端 {remote_ver})")
 
     if not apply_update_test_py(man):
         return ("error", "下載或覆寫 test.py 失敗")
@@ -548,7 +567,10 @@ def _launcher_main_impl(root: Path) -> int:
         return launch_main_script(root)
 
     if not version_less(local_ver, remote_ver):
-        print(f"[啟動] 已是最新或較新 (本地 {local_ver} / 遠端 {remote_ver})")
+        print(
+            f"[啟動] 無需更新：本地 {local_ver}，清單 version {remote_ver}。"
+            f"（僅當清單 version 大於本地 APP_VERSION 時才會下載；若剛改 Git 仍舊，多為 CDN 快取，已自動加參數重抓）"
+        )
         return launch_main_script(root)
 
     print(f"[更新] 發現新版本 {remote_ver} (目前 {local_ver})")
