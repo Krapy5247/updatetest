@@ -1,4 +1,4 @@
-# Python
+# --- Python ---
 __pycache__/
 *.py[cod]
 *$py.class
@@ -9,16 +9,38 @@ venv/
 env/
 ENV/
 
-# PyInstaller（onedir / onefile 產物）
+# --- PyInstaller / 打包 ---
 build/
 dist/
 *.spec
 *.spec.bak
+warn*.txt
 
-# Inno Setup 安裝檔輸出
+# --- Inno Setup ---
 installer_output/
 
-# 建置過程雜項
+# --- pip / 建置雜項 ---
 *.egg-info/
 .eggs/
 pip-wheel-metadata/
+
+# --- 測試／靜態檢查 ---
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+coverage.xml
+
+# --- IDE / 系統 ---
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# --- 本機執行期／敏感資料（勿提交；安裝檔內由使用者產生）---
+config.json
+launcher_crash.log
+lottery_record.json
+fb_registration_record.json

@@ -95,7 +95,8 @@ if ($LASTEXITCODE -ne 0) { throw "PyInstaller failed" }
 $distDir = Join-Path $PSScriptRoot "dist\TreasureClawLauncher"
 if (-not (Test-Path $distDir)) { throw "Missing output: $distDir" }
 
-foreach ($f in @("update_config.example.json", "update_manifest.example.json")) {
+# launcher 讀取的是 update_config.json（與 exe 同層）；必須一併打入 dist 供 Inno 安裝
+foreach ($f in @("update_config.json", "update_config.example.json", "update_manifest.example.json")) {
     $src = Join-Path $PSScriptRoot $f
     if (Test-Path $src) {
         Copy-Item -Force $src (Join-Path $distDir $f)
