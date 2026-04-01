@@ -41,7 +41,6 @@ except ImportError:
 from version_info import APP_VERSION  # 版本號請改 version_info.py（與 launcher 共用）
 from external_data import load_external_bundles
 from app_update import check_and_apply_update, get_manifest_url
-print('12345')
 
 _E = load_external_bundles()
 _t = _E.theme
