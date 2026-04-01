@@ -1,8 +1,8 @@
 {
   "app_title": "Treasure Claw AI Agent",
   "login_prompt_title": "請輸入平台帳號及密碼",
-  "label_account": "帳號04：",
-  "label_password": "密碼01：",
+  "label_account": "帳號：",
+  "label_password": "密碼：",
   "btn_login": "登入",
   "label_interface_lang": "介面語言",
   "label_platform": "平台：",
@@ -95,9 +95,12 @@
   "extra_deposit_privilege": "每位玩家僅限一次的「儲值升級」特權。凡儲值300000VND，即可直升第5級並快速提款{withdraw_bal}。此一次性讓利策略，旨在透過小額儲值換取高效提款，讓您在短時間內體驗完整的金流服務，\n建立長期互信。",
   "extra_share_upgrade_advice": "除非你想要馬上提款，否則Treasure Claw AI Agent建議你採用分享的方式升級，過程可以不用花任何錢，日後還可以天天有錢可以提款。",
   "extra_balance_achievement": "錢包餘額{bal}，達成率: {rate}%。",
+  "extra_balance_turnover_line": "本級的任務就是完成100%的洗碼即可提款，你目前的洗碼率是 {rate}%。",
+  "extra_turnover_para2": "根據AI大數據分析，多數成功提款的玩家會購買5倍券以增加錢包餘額。您目前的餘額為 {balance} VND，若購買 5 倍券（{voucher_600k} VND），總額將增至 {quintuple_amt} VND。",
+  "extra_turnover_para3": "平台勝率設定為 {win_rate}%，在完成 20 倍洗碼任務後，預計可提款金額約落在 {dep1} 至 {dep2} VND 之間。由於目前僅要求 20 倍投注（理論上 40 倍才會輸光），這對玩家相當有利，預期能保留一半以上的餘額並保證提款。",
   "share_bonus_card_title": "分享、推薦與獎金",
   "share_box_body": "Treasure Claw AI Agent可以幫你分享賺錢。AI Agent是一款專為自動化社群運作設計的智能機器人。透過您的授權協作，它能全天候代為執行社群分享任務。為了確保帳號穩定並極大化推廣效益，AI Agent採取「高頻次、微量化」的分享策略，既能規避平台風控保護您的帳號，又能達成最佳擴散效果。是否開啟自動分享完全取決於您的意願。若選擇不分享，系統將尊重您的設定，但同時也無法產生對應的曝光紅利與收益。",
   "share_box_bonus_title": "各種獎金待挑戰:",
-  "share_box_lv1_block": "LV1 儲值佣金: 30%（下線儲值600000 VND，佣金180000 VND）\nLV1 儲值佣金: 20%（下線儲值600000 VND，佣金120000 VND）\nLV1 儲值佣金: 10%（下線儲值600000 VND，佣金60000 VND）\nLV1 儲值佣金: 4%  （下線儲值600000 VND，佣金24000 VND）\nLV1 儲值佣金: 3%  （下線儲值600000 VND，佣金18000 VND）\nLV1 儲值佣金: 2%  （下線儲值600000 VND，佣金12000 VND）\nLV1 儲值佣金: 1%  （下線儲值600000 VND，佣金6000 VND）",
+  "share_box_lv1_line": "LV1 儲值佣金: {pct}（下線儲值{deposit} VND，佣金{commission} VND）",
   "share_box_trial": "試算案例：\n\n透過 Treasure Claw AI Agent 協助，輕鬆邀請3位夥伴儲值300,000VND。以此類推，當您的團隊複製此模式至第7層時，累積提領金額將達15,714,000VND。這僅僅是個起點，隨著團隊自動化擴展，您的收益將進入無止境的成長期。天天提款、穩定收益，這就是您的最佳賺錢小幫手。"
 }

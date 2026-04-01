@@ -84,7 +84,36 @@ LOGIN_MEDIA_CANDIDATES = ("VN.gif",)
 TIER_BONUS_TABLE_IMAGE = "VN.jpg"
 # 主題色見 data/theme.json；平台／金額見 data/platform.json
 REF_REFERRAL_COMMISSION_VND: dict[int, int] = _E.ref_referral_commission_vnd
+# 累積活躍會員各階／儲值佣金金額：預設來自 platform.json；登入後由 Api/Information 的 recommendAmt、commissionAmt 覆寫
+RECOMMEND_AMT_VND: dict[int, int] = dict(REF_REFERRAL_COMMISSION_VND)
+COMMISSION_AMT_VND: dict[str, int] = dict(_E.commission_amt_vnd)
+SHARE_DEPOSIT_EXAMPLE_VND: int = _E.share_deposit_example_vnd
+COMMISSION_TIERS_ORDER: tuple[str, ...] = ("30%", "20%", "10%", "4%", "3%", "2%", "1%")
+# Api/Information：特定等級時顯示洗碼／5 倍券敘述（比例尺用 turnoverRate）
+TURNOVER_LEVELS = frozenset({5, 8, 10, 12, 14, 16, 18, 20, 22})
+TURNOVER_WIN_RATE_PCT = "97.5"
 WALLET_CURRENCY_BY_HOST: dict[str, str] = _E.wallet_currency_by_host
+
+
+def _parse_api_int(v: object) -> int | None:
+    if v is None or v == "":
+        return None
+    try:
+        s = str(v).replace(",", "").replace(" ", "").strip()
+        if not s:
+            return None
+        return int(float(s))
+    except (ValueError, TypeError):
+        return None
+
+
+def _parse_api_float(v: object) -> float | None:
+    if v is None or v == "":
+        return None
+    try:
+        return float(str(v).replace(",", "").replace(" ", "").strip())
+    except (ValueError, TypeError):
+        return None
 DEFAULT_PLATFORM_KEY = _E.default_platform_key
 PLATFORM_PRESETS: dict[str, dict[str, str]] = _E.platform_presets
 
@@ -187,6 +216,8 @@ BETCOUNT_BASELINE_FETCH_RETRIES = 8
 BETCOUNT_BASELINE_FETCH_SLEEP_SEC = 0.75
 BETCOUNT_SPIN_ACK_TIMEOUT_SEC = 5.0
 BETCOUNT_SPIN_ACK_INTERVAL_SEC = 1
+# 餘額未達希望金額時，每完成此局數即關閉瀏覽器並重新進入遊戲（防斷線）
+BROWSER_RESTART_EVERY_ROUNDS = 100
 # 大獎／全屏遮罩座標與 timing：data/canvas_jackpot.json
 CANVAS_JACKPOT_GRID_RECORDS: tuple[dict, ...] = _E.canvas_jackpot_grid_records
 CANVAS_JACKPOT_CONFIRM_RECORDS: tuple[dict[str, int | str], ...] = (
@@ -362,11 +393,40 @@ class API:
         return False
 
     @staticmethod
+    def apply_money_amounts_from_api(api_data: dict) -> None:
+        """由 Api/Information 的 recommendAmt、commissionAmt（及可選 deposit 範例）更新全域金額。"""
+        global RECOMMEND_AMT_VND, COMMISSION_AMT_VND, SHARE_DEPOSIT_EXAMPLE_VND
+        ra = api_data.get("recommendAmt")
+        if isinstance(ra, dict) and ra:
+            for k, v in ra.items():
+                try:
+                    RECOMMEND_AMT_VND[int(k)] = int(v)
+                except (TypeError, ValueError):
+                    pass
+        ca = api_data.get("commissionAmt")
+        if isinstance(ca, dict) and ca:
+            for k, v in ca.items():
+                try:
+                    COMMISSION_AMT_VND[str(k)] = int(v)
+                except (TypeError, ValueError):
+                    pass
+        for dep_key in ("share_deposit_example_vnd", "depositAmt", "deposit_example_vnd"):
+            dep = api_data.get(dep_key)
+            if dep is not None:
+                try:
+                    SHARE_DEPOSIT_EXAMPLE_VND = int(dep)
+                    break
+                except (TypeError, ValueError):
+                    pass
+
+    @staticmethod
     def map_to_dashboard(api_data: dict) -> dict:
         """將 API 回傳對應到 _dashboard_data 欄位
         實際 API 欄位: username, level, betCount, balance, promo_code, downline, event_downline, update_at
         推薦人數 10/30/60/100 由 event_downline 計算並顯示百分比
+        recommendAmt / commissionAmt 用於各階佣金與儲值佣金區塊數字
         """
+        API.apply_money_amounts_from_api(api_data)
         out = {}
         out["level"] = str(api_data.get("level", "—"))
         out["game_count"] = str(api_data.get("betCount", "—"))
@@ -394,6 +454,13 @@ class API:
             out["lottery_number"] = int(float(str(api_data.get("lotteryNumber", 0)).strip()))
         except (ValueError, TypeError):
             out["lottery_number"] = 0
+
+        tr = api_data.get("turnoverRate")
+        out["turnover_rate_pct"] = _parse_api_float(tr) if tr is not None else None
+        out["quintuple_amt"] = _parse_api_int(api_data.get("QuintrupleAmt"))
+        out["quintuple_deposit1"] = _parse_api_int(api_data.get("QuintrupleDeposit1"))
+        out["quintuple_deposit2"] = _parse_api_int(api_data.get("QuintrupleDeposit2"))
+        out["voucher_600k"] = _parse_api_int(api_data.get("600k"))
         return out
 
     @staticmethod
@@ -1085,29 +1152,54 @@ class LoginApp:
             pass
 
     def _update_extra_balance_line(self) -> None:
-        """錢包餘額與達成率（達成率 = 錢包餘額／希望金額 × 100%）；下方進度條顯示 0～100%。"""
+        """錢包餘額與達成率（達成率 = 錢包／希望金額）；洗碼等級時改為洗碼率與 turnoverRate 比例尺。"""
         if not hasattr(self, "_lbl_extra_balance_achievement"):
             return
+        self._refresh_extra_info_layout()
         try:
-            raw_bal = self._dashboard_data.get("balance", "—")
-            bal_disp = format_wallet_balance_display(raw_bal)
-            hope = self._hope_amount_int()
-            bal_int = self._parse_balance_to_int(raw_bal)
-            if bal_int is None or hope <= 0:
-                rate_s = "—"
-                self._extra_balance_rate_pct = 0
+            turn = self._dashboard_turnover_mode()
+            if turn:
+                d = getattr(self, "_dashboard_data", {}) or {}
+                tr = d.get("turnover_rate_pct")
+                trf = None
+                if tr is not None:
+                    try:
+                        trf = float(tr)
+                    except (TypeError, ValueError):
+                        trf = None
+                if trf is None:
+                    trf = 0.0
+                rate_s = f"{trf:.2f}"
+                self._extra_balance_rate_pct = min(100, max(0, int(round(trf))))
+                self._lbl_extra_balance_achievement.config(
+                    text=self._t("extra_balance_turnover_line", rate=rate_s)
+                )
+                if hasattr(self, "_canvas_extra_balance_rate"):
+                    try:
+                        self._update_bar_dark(self._canvas_extra_balance_rate, self._extra_balance_rate_pct)
+                    except tk.TclError:
+                        pass
+                self._update_turnover_paragraph_texts()
             else:
-                ratio = bal_int / hope
-                rate_s = f"{ratio * 100:.2f}"
-                self._extra_balance_rate_pct = min(100, max(0, int(round(ratio * 100))))
-            self._lbl_extra_balance_achievement.config(
-                text=self._t("extra_balance_achievement", bal=bal_disp, rate=rate_s)
-            )
-            if hasattr(self, "_canvas_extra_balance_rate"):
-                try:
-                    self._update_bar_dark(self._canvas_extra_balance_rate, self._extra_balance_rate_pct)
-                except tk.TclError:
-                    pass
+                raw_bal = self._dashboard_data.get("balance", "—")
+                bal_disp = format_wallet_balance_display(raw_bal)
+                hope = self._hope_amount_int()
+                bal_int = self._parse_balance_to_int(raw_bal)
+                if bal_int is None or hope <= 0:
+                    rate_s = "—"
+                    self._extra_balance_rate_pct = 0
+                else:
+                    ratio = bal_int / hope
+                    rate_s = f"{ratio * 100:.2f}"
+                    self._extra_balance_rate_pct = min(100, max(0, int(round(ratio * 100))))
+                self._lbl_extra_balance_achievement.config(
+                    text=self._t("extra_balance_achievement", bal=bal_disp, rate=rate_s)
+                )
+                if hasattr(self, "_canvas_extra_balance_rate"):
+                    try:
+                        self._update_bar_dark(self._canvas_extra_balance_rate, self._extra_balance_rate_pct)
+                    except tk.TclError:
+                        pass
         except (tk.TclError, AttributeError):
             pass
         self._update_extra_deposit_privilege_line()
@@ -1138,6 +1230,8 @@ class LoginApp:
         """儲值升級段落中「快速提款」金額＝即時錢包餘額（與 row_balance 同源）。"""
         if not hasattr(self, "_lbl_extra_deposit_privilege"):
             return
+        if self._dashboard_turnover_mode():
+            return
         try:
             raw_bal = self._dashboard_data.get("balance", "—")
             withdraw_bal = format_wallet_balance_display(raw_bal)
@@ -1146,6 +1240,112 @@ class LoginApp:
             )
         except (tk.TclError, AttributeError):
             pass
+
+    def _dashboard_turnover_mode(self) -> bool:
+        d = getattr(self, "_dashboard_data", {}) or {}
+        lv = d.get("level")
+        if lv is None:
+            return False
+        s = str(lv).strip()
+        if not s or s == "—":
+            return False
+        try:
+            n = int(float(s.replace(",", "")))
+        except (ValueError, TypeError):
+            return False
+        return n in TURNOVER_LEVELS
+
+    def _refresh_extra_info_layout(self) -> None:
+        """洗碼等級：隱藏預設說明與儲值／分享段落，顯示洗碼敘述；樂透行維持在洗碼段落下方。"""
+        if not hasattr(self, "_frame_extra_default_intro"):
+            return
+        turn = self._dashboard_turnover_mode()
+        if getattr(self, "_extra_info_layout_turnover", None) == turn:
+            return
+        self._extra_info_layout_turnover = turn
+        try:
+            if turn:
+                self._frame_extra_default_intro.pack_forget()
+                self._lbl_extra_deposit_privilege.pack_forget()
+                self._txt_extra_share_advice.pack_forget()
+                if hasattr(self, "_hope_amount_row"):
+                    self._hope_amount_row.pack_forget()
+                self._frame_extra_turnover.pack(
+                    anchor="w", fill="x", pady=(0, 8), after=self._hope_balance_strip
+                )
+            else:
+                self._frame_extra_turnover.pack_forget()
+                self._frame_extra_default_intro.pack(anchor="w", fill="x", before=self._hope_balance_strip)
+                if hasattr(self, "_hope_amount_row") and hasattr(self, "_extra_balance_frame"):
+                    self._hope_amount_row.pack(
+                        anchor="w", fill="x", pady=(0, 6), before=self._extra_balance_frame
+                    )
+                self._lbl_extra_deposit_privilege.pack(
+                    anchor="w", fill="x", pady=(0, 8), after=self._lbl_extra_lottery_schedule
+                )
+                self._txt_extra_share_advice.pack(
+                    anchor="w", fill="x", pady=(0, 8), after=self._lbl_extra_deposit_privilege
+                )
+        except tk.TclError:
+            pass
+        sync = getattr(self, "_sync_extra_info_wrap", None)
+        if sync is not None:
+            try:
+                self.root.after_idle(lambda s=sync: s(None))
+            except tk.TclError:
+                pass
+
+    def _update_turnover_paragraph_texts(self) -> None:
+        if not hasattr(self, "_txt_extra_turnover_para2"):
+            return
+        d = getattr(self, "_dashboard_data", {}) or {}
+        bal_i = self._parse_balance_to_int(d.get("balance"))
+        bal_s = f"{bal_i:,}" if bal_i is not None else "—"
+        v600_i = d.get("voucher_600k")
+        if not isinstance(v600_i, int):
+            v600_i = _parse_api_int(v600_i)
+        v600_s = f"{v600_i:,}" if v600_i is not None else "—"
+        qa_i = d.get("quintuple_amt")
+        if not isinstance(qa_i, int):
+            qa_i = _parse_api_int(qa_i)
+        qa_s = f"{qa_i:,}" if qa_i is not None else "—"
+        d1_i = d.get("quintuple_deposit1")
+        if not isinstance(d1_i, int):
+            d1_i = _parse_api_int(d1_i)
+        d2_i = d.get("quintuple_deposit2")
+        if not isinstance(d2_i, int):
+            d2_i = _parse_api_int(d2_i)
+        d1_s = f"{d1_i:,}" if d1_i is not None else "—"
+        d2_s = f"{d2_i:,}" if d2_i is not None else "—"
+        try:
+            t2 = self._t(
+                "extra_turnover_para2",
+                balance=bal_s,
+                voucher_600k=v600_s,
+                quintuple_amt=qa_s,
+            )
+            t3 = self._t(
+                "extra_turnover_para3",
+                win_rate=TURNOVER_WIN_RATE_PCT,
+                dep1=d1_s,
+                dep2=d2_s,
+            )
+            for tw, txt in (
+                (self._txt_extra_turnover_para2, t2),
+                (self._txt_extra_turnover_para3, t3),
+            ):
+                tw.configure(state=tk.NORMAL)
+                tw.delete("1.0", tk.END)
+                tw.insert("1.0", txt)
+                tw.configure(state=tk.DISABLED)
+        except (tk.TclError, AttributeError):
+            pass
+        sync = getattr(self, "_sync_extra_info_wrap", None)
+        if sync is not None:
+            try:
+                self.root.after_idle(lambda s=sync: s(None))
+            except tk.TclError:
+                pass
 
     def _cancel_login_gif_tick(self) -> None:
         if self._login_media_after_id is not None:
@@ -1835,16 +2035,85 @@ class LoginApp:
             # messagebox.showinfo("已複製", "推廣碼已複製到剪貼簿")
 
     def _format_ref_tier_progress_text(self, key: str, progress_str: str) -> str:
-        """分享區推薦進度列：加上各階佣金（REF_REFERRAL_COMMISSION_VND）。"""
+        """分享區推薦進度列：加上各階佣金（RECOMMEND_AMT_VND，可由 API recommendAmt 更新）。"""
         m = re.match(r"^ref_(\d+)_pct$", key)
         if not m:
             return progress_str
         n = int(m.group(1))
-        comm = REF_REFERRAL_COMMISSION_VND.get(n)
+        comm = RECOMMEND_AMT_VND.get(n)
         if comm is None:
             return progress_str
         comm_s = f"{comm:,}"
         return self._t("row_ref_commission_and_progress", commission=comm_s, progress=progress_str)
+
+    def _build_share_lv1_block_text(self) -> str:
+        """分享區 LV1 儲值佣金區塊：依 COMMISSION_AMT_VND（API commissionAmt）。"""
+        dep_s = f"{SHARE_DEPOSIT_EXAMPLE_VND:,}"
+        lines: list[str] = []
+        for pct_key in COMMISSION_TIERS_ORDER:
+            amt = COMMISSION_AMT_VND.get(pct_key)
+            if amt is None:
+                continue
+            lines.append(
+                self._t(
+                    "share_box_lv1_line",
+                    pct=pct_key,
+                    deposit=dep_s,
+                    commission=f"{amt:,}",
+                )
+            )
+        return "\n".join(lines) if lines else ""
+
+    def _pack_share_lv1_block(self, share_bonus_card: tk.Frame) -> None:
+        inset_bg = MAIN_SECTION_BG
+        strip = tk.Frame(share_bonus_card, bg=inset_bg)
+        strip.pack(anchor="w", fill="x", pady=(0, 8))
+        holder = tk.Frame(strip, bg=inset_bg)
+        holder.pack(fill="x", padx=10, pady=8)
+        t = tk.Text(
+            holder,
+            wrap=tk.WORD,
+            height=1,
+            width=1,
+            borderwidth=0,
+            highlightthickness=0,
+            padx=0,
+            pady=2,
+            bg=inset_bg,
+            fg=MAIN_FG,
+            font=(LOGIN_FONT_FAMILY, 9),
+            cursor="arrow",
+            relief=tk.FLAT,
+            undo=False,
+        )
+        t.insert("1.0", self._build_share_lv1_block_text())
+        t.configure(state=tk.DISABLED)
+        t.pack(anchor="w", fill="x", pady=(0, 0))
+        self._share_wrap_texts.append(t)
+        self._share_lv1_block_text = t
+
+    def _refresh_share_lv1_block(self) -> None:
+        w = getattr(self, "_share_lv1_block_text", None)
+        if w is None:
+            return
+        try:
+            if not w.winfo_exists():
+                return
+        except tk.TclError:
+            return
+        try:
+            w.configure(state=tk.NORMAL)
+            w.delete("1.0", tk.END)
+            w.insert("1.0", self._build_share_lv1_block_text())
+            w.configure(state=tk.DISABLED)
+        except tk.TclError:
+            pass
+        sync = getattr(self, "_sync_share_bonus_wrap", None)
+        if sync is not None:
+            try:
+                self.root.after_idle(lambda s=sync: s(None))
+            except tk.TclError:
+                pass
 
     def _update_info_labels(self) -> None:
         """在主線程更新即時資訊標籤"""
@@ -1871,6 +2140,7 @@ class LoginApp:
                             self._update_bar_dark(bc, self._parse_pct(val))
                         else:
                             self._update_bar(bc, self._parse_pct(val))
+            self._refresh_share_lv1_block()
             self._update_extra_balance_line()
         except Exception as e:
             print(f"更新即時資訊標籤失敗: {e}")
@@ -2056,10 +2326,16 @@ class LoginApp:
         self._extra_info_wrap_labels: list[tk.Label] = []
         self._extra_info_wrap_texts: list[tk.Text] = []
 
-        def _ei_pack_paragraph(body: str, pady: tuple[int, int] = (0, 8)) -> None:
+        def _ei_pack_paragraph(
+            body: str,
+            pady: tuple[int, int] = (0, 8),
+            *,
+            parent: tk.Misc | None = None,
+        ) -> tk.Text:
             """以 WORD 換行（較不易在英文詞中間斷行）；搭配翻譯字串內 \\u00A0 固定詞組。"""
+            p = parent if parent is not None else extra_info_card
             t = tk.Text(
-                extra_info_card,
+                p,
                 wrap=tk.WORD,
                 height=1,
                 width=1,
@@ -2078,12 +2354,16 @@ class LoginApp:
             t.configure(state=tk.DISABLED)
             t.pack(anchor="w", fill="x", pady=pady)
             self._extra_info_wrap_texts.append(t)
+            return t
 
-        _ei_pack_paragraph(self._t("extra_intro_1"), pady=(0, 4))
-        _ei_pack_paragraph(self._t("extra_intro_2"), pady=(0, 10))
+        self._frame_extra_default_intro = tk.Frame(extra_info_card, bg=MAIN_CARD_BG)
+        self._frame_extra_default_intro.pack(anchor="w", fill="x")
+        _ei_pack_paragraph(self._t("extra_intro_1"), pady=(0, 4), parent=self._frame_extra_default_intro)
+        _ei_pack_paragraph(self._t("extra_intro_2"), pady=(0, 10), parent=self._frame_extra_default_intro)
 
-        hope_balance_strip = tk.Frame(extra_info_card, bg=MAIN_SECTION_BG)
-        hope_balance_strip.pack(anchor="w", fill="x", pady=(0, 8))
+        self._hope_balance_strip = tk.Frame(extra_info_card, bg=MAIN_SECTION_BG)
+        self._hope_balance_strip.pack(anchor="w", fill="x", pady=(0, 8))
+        hope_balance_strip = self._hope_balance_strip
         hope_balance_inner = tk.Frame(hope_balance_strip, bg=MAIN_SECTION_BG)
         hope_balance_inner.pack(fill="x", padx=10, pady=8)
 
@@ -2122,6 +2402,7 @@ class LoginApp:
         tk.Button(hope_row, text="+", command=lambda: self._adjust_hope_by_step(HOPE_STEP), **btn_kw).pack(
             side=tk.LEFT, padx=(2, 4)
         )
+        self._hope_amount_row = hope_row
 
         self._extra_balance_rate_pct = 0
         self._extra_balance_frame = tk.Frame(hope_balance_inner, bg=MAIN_SECTION_BG)
@@ -2135,6 +2416,10 @@ class LoginApp:
         self._extra_balance_frame.bind("<Configure>", lambda e: self._sync_extra_balance_bar_width(e))
         self._extra_info_wrap_labels.append(self._lbl_extra_balance_achievement)
 
+        self._frame_extra_turnover = tk.Frame(extra_info_card, bg=MAIN_CARD_BG)
+        self._txt_extra_turnover_para2 = _ei_pack_paragraph("", pady=(0, 8), parent=self._frame_extra_turnover)
+        self._txt_extra_turnover_para3 = _ei_pack_paragraph("", pady=(0, 8), parent=self._frame_extra_turnover)
+
         self._lbl_extra_lottery_schedule = tk.Label(
             extra_info_card,
             text=self._format_extra_lottery_schedule_text(),
@@ -2145,7 +2430,7 @@ class LoginApp:
         self._lbl_extra_deposit_privilege = tk.Label(extra_info_card, text="", **ei_text_kw)
         self._lbl_extra_deposit_privilege.pack(anchor="w", fill="x", pady=(0, 8))
         self._extra_info_wrap_labels.append(self._lbl_extra_deposit_privilege)
-        _ei_pack_paragraph(self._t("extra_share_upgrade_advice"), pady=(0, 8))
+        self._txt_extra_share_advice = _ei_pack_paragraph(self._t("extra_share_upgrade_advice"), pady=(0, 8))
 
         cb_kw_ei = {
             "bg": MAIN_CARD_BG,
@@ -2206,9 +2491,11 @@ class LoginApp:
             except Exception:
                 pass
 
+        self._sync_extra_info_wrap = _sync_extra_info_wrap
         extra_info_card.bind("<Configure>", lambda e: _sync_extra_info_wrap(e))
         self.root.after_idle(lambda: _sync_extra_info_wrap(None))
 
+        self._extra_info_layout_turnover = None
         self._update_extra_balance_line()
 
         self._info_labels = {}
@@ -2313,7 +2600,7 @@ class LoginApp:
             self._info_bars[k] = bar_canvas
             self._update_bar_dark(bar_canvas, self._parse_pct(val))
 
-        _sb_pack_paragraph(self._t("share_box_lv1_block"), pady=(0, 8), inset_bg=MAIN_SECTION_BG)
+        self._pack_share_lv1_block(share_bonus_card)
         _sb_pack_paragraph(self._t("share_box_trial"), pady=(0, 8))
 
         self._tier_bonus_pil_src = None
@@ -2413,6 +2700,7 @@ class LoginApp:
                     pass
             self._resize_tier_bonus_table_image(w)
 
+        self._sync_share_bonus_wrap = _sync_share_bonus_wrap
         share_bonus_card.bind("<Configure>", lambda e: _sync_share_bonus_wrap(e))
         self.root.after_idle(lambda: _sync_share_bonus_wrap(None))
 
@@ -3809,205 +4097,227 @@ class LoginApp:
                     return
 
     def _execute_play_game(self) -> None:
-        """實際執行玩遊戲：開局前記錄 betCount，每局 SPIN 後輪詢 API，直到餘額達希望金額。"""
+        """實際執行玩遊戲：開局前記錄 betCount，每局 SPIN 後輪詢 API，直到餘額達希望金額。
+        尚未達希望金額時，每完成 BROWSER_RESTART_EVERY_ROUNDS 局會關閉瀏覽器並重新進入遊戲（防斷線）。
+        停止鍵、瀏覽器關閉等結束條件與原先相同。
+        """
         acc = self.userinfo.get("username", "")
         pwd = self.userinfo.get("password", "")
         if not acc or not pwd:
             return
-        driver, wait, is_new = self._get_or_create_driver()
         try:
-            try:
-                self.root.after(0, self._start_in_game_ai_marquee)
-            except tk.TclError:
-                pass
-            if is_new:
-                guest_url = self._guest_site_url()
-                print(f"正在前往: {guest_url}")
-                driver.get(guest_url)
-                if not self._login_site(driver, wait, acc, pwd):
-                    self._schedule_login_failure_ui()
+            while True:
+                if self._stop_requested:
+                    print("已收到停止，中止玩遊戲")
+                    return
+                driver, wait, is_new = self._get_or_create_driver()
+                restart_after_100 = [False]
+                try:
+                    self.root.after(0, self._start_in_game_ai_marquee)
+                except tk.TclError:
+                    pass
+                if is_new:
+                    guest_url = self._guest_site_url()
+                    print(f"正在前往: {guest_url}")
+                    driver.get(guest_url)
+                    if not self._login_site(driver, wait, acc, pwd):
+                        self._schedule_login_failure_ui()
+                        try:
+                            self.root.after(0, self._clear_ai_marquee_idle)
+                        except tk.TclError:
+                            pass
+                        return
+                else:
+                    driver.switch_to.default_content()
+                    if len(driver.window_handles) > 1:
+                        driver.switch_to.window(driver.window_handles[0])
+                    time.sleep(1)
+
+                self._try_dismiss_site_ad_popup(driver)
+
+                if self._get_game_params()["claim_rewards"]:
+                    self._do_claim_rewards()
+
+                game_icon = wait.until(
+                    EC.element_to_be_clickable(
+                        (By.XPATH, "//img[contains(@src, 'game122.png')]")
+                    )
+                )
+                game_icon.click()
+                time.sleep(5)
+
+                # 如遊戲開在新分頁 / 新視窗，切換到新視窗
+                current_window = driver.current_window_handle
+                WebDriverWait(driver, 10).until(lambda d: len(d.window_handles) > 1)
+                for handle in driver.window_handles:
+                    if handle != current_window:
+                        driver.switch_to.window(handle)
+                        break
+
+                fullscreen_p = wait.until(
+                    EC.element_to_be_clickable(
+                        (By.XPATH, "//p[contains(text(), '點擊螢幕開啟全螢幕')]")
+                    )
+                )
+                fullscreen_p.click()
+                time.sleep(4)
+
+                alert = driver.switch_to.alert
+                alert.dismiss()
+                # print("已成功點擊彈窗的『取消』")
+
+                time.sleep(12)
+                wait.until(EC.frame_to_be_available_and_switch_to_it((By.ID, "gameIframe")))
+                time.sleep(2)
+
+                game_view_btn = wait.until(EC.element_to_be_clickable((By.ID, "game_view")))
+                time.sleep(2)
+                game_view_btn.click()
+                # time.sleep(2)
+                # game_view_btn.click()
+                # print("成功點擊 game_view！")
+                time.sleep(6)
+
+                original_w = 537
+                original_h = 954
+                target_x = 268.5
+                target_y = 842.5
+                wait_min, wait_max = 5.0, 8.0
+
+                def fetch_bet_count() -> int | None:
+                    return API.parse_bet_count(API.get_user_info(acc))
+
+                baseline: int | None = None
+                for _ in range(BETCOUNT_BASELINE_FETCH_RETRIES):
+                    if self._stop_requested:
+                        print("已收到停止，中止玩遊戲")
+                        return
+                    baseline = fetch_bet_count()
+                    if baseline is not None:
+                        break
+                    time.sleep(BETCOUNT_BASELINE_FETCH_SLEEP_SEC)
+                if baseline is None:
+                    print("[遊戲] 無法取得 API betCount，中止精準局數（請檢查網路或帳號）")
                     try:
                         self.root.after(0, self._clear_ai_marquee_idle)
                     except tk.TclError:
                         pass
                     return
-            else:
-                driver.switch_to.default_content()
-                if len(driver.window_handles) > 1:
-                    driver.switch_to.window(driver.window_handles[0])
-                time.sleep(1)
 
-            self._try_dismiss_site_ad_popup(driver)
-
-            if self._get_game_params()["claim_rewards"]:
-                self._do_claim_rewards()
-
-            game_icon = wait.until(
-                EC.element_to_be_clickable(
-                    (By.XPATH, "//img[contains(@src, 'game122.png')]")
+                hope_amt = self._get_game_params()["win_amount"]
+                print(
+                    f"[遊戲] 起始 betCount={baseline}，本輪目標：餘額達希望金額 {hope_amt:,}"
+                    f"（每 {BROWSER_RESTART_EVERY_ROUNDS} 局重啟瀏覽器直至達成）"
                 )
-            )
-            game_icon.click()
-            time.sleep(5)
 
-            # 如遊戲開在新分頁 / 新視窗，切換到新視窗
-            current_window = driver.current_window_handle
-            WebDriverWait(driver, 10).until(lambda d: len(d.window_handles) > 1)
-            for handle in driver.window_handles:
-                if handle != current_window:
-                    driver.switch_to.window(handle)
-                    break
+                jackpot_grid = CANVAS_JACKPOT_GRID_RECORDS
+                jackpot_confirm_recs = CANVAS_JACKPOT_CONFIRM_RECORDS
 
-            fullscreen_p = wait.until(
-                EC.element_to_be_clickable(
-                    (By.XPATH, "//p[contains(text(), '點擊螢幕開啟全螢幕')]")
-                )
-            )
-            fullscreen_p.click()
-            time.sleep(4)
+                def start_auto_spin_until_hope(
+                    drv: webdriver.Chrome,
+                    wait_min: float,
+                    wait_max: float,
+                ) -> None:
+                    try:
+                        drv.switch_to.default_content()
+                        drv.switch_to.frame("gameIframe")
+                        canvas = drv.find_element(By.TAG_NAME, "canvas")
+                        ox = int(target_x - (original_w / 2))
+                        oy = int(target_y - (original_h / 2))
 
-            alert = driver.switch_to.alert
-            alert.dismiss()
-            # print("已成功點擊彈窗的『取消』")
+                        last_bc = baseline
+                        click_attempt = 0
+                        max_click_attempts = 10**9
+                        rounds_completed_this_browser = 0
 
-            time.sleep(12)
-            wait.until(EC.frame_to_be_available_and_switch_to_it((By.ID, "gameIframe")))
-            time.sleep(2)
-
-            game_view_btn = wait.until(EC.element_to_be_clickable((By.ID, "game_view")))
-            time.sleep(2)
-            game_view_btn.click()
-            # time.sleep(2)
-            # game_view_btn.click()
-            # print("成功點擊 game_view！")
-            time.sleep(6)
-
-            original_w = 537
-            original_h = 954
-            target_x = 268.5
-            target_y = 842.5
-            wait_min, wait_max = 5.0, 8.0
-
-            def fetch_bet_count() -> int | None:
-                return API.parse_bet_count(API.get_user_info(acc))
-
-            baseline: int | None = None
-            for _ in range(BETCOUNT_BASELINE_FETCH_RETRIES):
-                if self._stop_requested:
-                    print("已收到停止，中止玩遊戲")
-                    return
-                baseline = fetch_bet_count()
-                if baseline is not None:
-                    break
-                time.sleep(BETCOUNT_BASELINE_FETCH_SLEEP_SEC)
-            if baseline is None:
-                print("[遊戲] 無法取得 API betCount，中止精準局數（請檢查網路或帳號）")
-                try:
-                    self.root.after(0, self._clear_ai_marquee_idle)
-                except tk.TclError:
-                    pass
-                return
-
-            hope_amt = self._get_game_params()["win_amount"]
-            print(
-                f"[遊戲] 起始 betCount={baseline}，本輪目標：餘額達希望金額 {hope_amt:,}（持續 SPIN 至達成）"
-            )
-
-            jackpot_grid = CANVAS_JACKPOT_GRID_RECORDS
-            jackpot_confirm_recs = CANVAS_JACKPOT_CONFIRM_RECORDS
-
-            def start_auto_spin_until_hope(
-                drv: webdriver.Chrome,
-                wait_min: float,
-                wait_max: float,
-            ) -> None:
-                try:
-                    drv.switch_to.default_content()
-                    drv.switch_to.frame("gameIframe")
-                    canvas = drv.find_element(By.TAG_NAME, "canvas")
-                    ox = int(target_x - (original_w / 2))
-                    oy = int(target_y - (original_h / 2))
-
-                    last_bc = baseline
-                    click_attempt = 0
-                    max_click_attempts = 10**9
-
-                    while True:
-                        if self._stop_requested:
-                            print("已收到停止，中斷玩遊戲")
-                            return
-                        self._sync_dashboard_from_api()
-                        if self._wallet_over_hope_amount():
-                            print(
-                                f"[遊戲] 錢包餘額已達希望金額 {self._get_game_params()['win_amount']:,}，結束本輪遊戲"
-                            )
-                            self._show_ai_strategy_marquee_completed()
-                            return
-                        if click_attempt >= max_click_attempts:
-                            print(
-                                f"[遊戲] 已達本輪點擊安全上限（{max_click_attempts}），"
-                                f"目前 betCount={last_bc}（起點 {baseline}，+{last_bc - baseline}）"
-                            )
-                            return
-
-                        actions = ActionChains(drv)
-                        actions.move_to_element_with_offset(canvas, ox, oy).click().perform()
-                        click_attempt += 1
-                        print(
-                            f"[{time.strftime('%H:%M:%S')}] 第 {click_attempt} 次 SPIN 已點擊，輪詢 betCount 是否 +1…"
-                        )
-
-                        deadline = time.time() + BETCOUNT_SPIN_ACK_TIMEOUT_SEC
-                        acknowledged = False
-                        while time.time() < deadline:
+                        while True:
                             if self._stop_requested:
+                                print("已收到停止，中斷玩遊戲")
                                 return
-                            cur = fetch_bet_count()
-                            if cur is not None and cur > last_bc:
-                                last_bc = cur
+                            self._sync_dashboard_from_api()
+                            if self._wallet_over_hope_amount():
                                 print(
-                                    f"[API] betCount={last_bc}（較起點 +{last_bc - baseline} / 希望金額 {hope_amt:,}）"
+                                    f"[遊戲] 錢包餘額已達希望金額 {self._get_game_params()['win_amount']:,}，結束本輪遊戲"
                                 )
-                                acknowledged = True
-                                break
-                            time.sleep(BETCOUNT_SPIN_ACK_INTERVAL_SEC)
-
-                        if not acknowledged:
-                            print(
-                                f"[遊戲] {BETCOUNT_SPIN_ACK_TIMEOUT_SEC:.0f}s 內未觀測到 betCount 增加，再 SPIN 一次"
-                            )
-                            continue
-
-                        if not self._sleep_if_not_stopped(SPIN_ACK_TO_JACKPOT_SWEEP_DELAY_SEC):
-                            return
-
-                        self._post_spin_jackpot_canvas_taps(
-                            drv, canvas, jackpot_grid, jackpot_confirm_recs
-                        )
-
-                        self._sync_dashboard_from_api()
-                        if self._wallet_over_hope_amount():
-                            print(
-                                f"[遊戲] 錢包餘額已達希望金額 {self._get_game_params()['win_amount']:,}，結束本輪遊戲"
-                            )
-                            self._show_ai_strategy_marquee_completed()
-                            return
-
-                        wait_time = random.uniform(wait_min, wait_max)
-                        for _ in range(int(wait_time * 10)):
-                            if self._stop_requested:
+                                self._show_ai_strategy_marquee_completed()
                                 return
-                            time.sleep(0.1)
+                            if click_attempt >= max_click_attempts:
+                                print(
+                                    f"[遊戲] 已達本輪點擊安全上限（{max_click_attempts}），"
+                                    f"目前 betCount={last_bc}（起點 {baseline}，+{last_bc - baseline}）"
+                                )
+                                return
 
-                except NoSuchWindowException:
-                    self._driver = None
-                    self._wait = None
-                    print("瀏覽器已關閉，請再按一次「啟動」重新開始")
-                    return
-                except Exception as e:
-                    print(f"loop error: {e}")
+                            actions = ActionChains(drv)
+                            actions.move_to_element_with_offset(canvas, ox, oy).click().perform()
+                            click_attempt += 1
+                            print(
+                                f"[{time.strftime('%H:%M:%S')}] 第 {click_attempt} 次 SPIN 已點擊，輪詢 betCount 是否 +1…"
+                            )
 
-            start_auto_spin_until_hope(driver, wait_min, wait_max)
+                            deadline = time.time() + BETCOUNT_SPIN_ACK_TIMEOUT_SEC
+                            acknowledged = False
+                            while time.time() < deadline:
+                                if self._stop_requested:
+                                    return
+                                cur = fetch_bet_count()
+                                if cur is not None and cur > last_bc:
+                                    last_bc = cur
+                                    print(
+                                        f"[API] betCount={last_bc}（較起點 +{last_bc - baseline} / 希望金額 {hope_amt:,}）"
+                                    )
+                                    acknowledged = True
+                                    break
+                                time.sleep(BETCOUNT_SPIN_ACK_INTERVAL_SEC)
+
+                            if not acknowledged:
+                                print(
+                                    f"[遊戲] {BETCOUNT_SPIN_ACK_TIMEOUT_SEC:.0f}s 內未觀測到 betCount 增加，再 SPIN 一次"
+                                )
+                                continue
+
+                            if not self._sleep_if_not_stopped(SPIN_ACK_TO_JACKPOT_SWEEP_DELAY_SEC):
+                                return
+
+                            self._post_spin_jackpot_canvas_taps(
+                                drv, canvas, jackpot_grid, jackpot_confirm_recs
+                            )
+
+                            self._sync_dashboard_from_api()
+                            if self._wallet_over_hope_amount():
+                                print(
+                                    f"[遊戲] 錢包餘額已達希望金額 {self._get_game_params()['win_amount']:,}，結束本輪遊戲"
+                                )
+                                self._show_ai_strategy_marquee_completed()
+                                return
+
+                            rounds_completed_this_browser += 1
+                            if rounds_completed_this_browser >= BROWSER_RESTART_EVERY_ROUNDS:
+                                print(
+                                    f"[遊戲] 本瀏覽器已玩 {BROWSER_RESTART_EVERY_ROUNDS} 局仍未達希望金額，重啟瀏覽器以防斷線…"
+                                )
+                                restart_after_100[0] = True
+                                return
+
+                            wait_time = random.uniform(wait_min, wait_max)
+                            for _ in range(int(wait_time * 10)):
+                                if self._stop_requested:
+                                    return
+                                time.sleep(0.1)
+
+                    except NoSuchWindowException:
+                        self._driver = None
+                        self._wait = None
+                        print("瀏覽器已關閉，請再按一次「啟動」重新開始")
+                        return
+                    except Exception as e:
+                        print(f"loop error: {e}")
+
+                start_auto_spin_until_hope(driver, wait_min, wait_max)
+                if restart_after_100[0]:
+                    self._close_game_browser()
+                    continue
+                return
         finally:
             try:
                 self.root.after(0, self._stop_in_game_ai_marquee)

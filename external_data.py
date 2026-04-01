@@ -50,6 +50,8 @@ class ExternalBundles:
     platform_presets: dict[str, dict[str, str]]
     wallet_currency_by_host: dict[str, str]
     ref_referral_commission_vnd: dict[int, int]
+    commission_amt_vnd: dict[str, int]
+    share_deposit_example_vnd: int
     win_base: int
     win_default: int
     win_max: int
@@ -93,6 +95,27 @@ def load_external_bundles() -> ExternalBundles:
                 ref_referral_commission_vnd[int(k)] = int(v)
             except (TypeError, ValueError):
                 continue
+
+    comm_raw = plat.get("commission_amt_vnd") or {}
+    commission_amt_vnd: dict[str, int] = {}
+    if isinstance(comm_raw, dict):
+        for k, v in comm_raw.items():
+            try:
+                commission_amt_vnd[str(k)] = int(v)
+            except (TypeError, ValueError):
+                continue
+    if not commission_amt_vnd:
+        commission_amt_vnd = {
+            "30%": 180000,
+            "20%": 120000,
+            "10%": 60000,
+            "4%": 24000,
+            "3%": 18000,
+            "2%": 12000,
+            "1%": 6000,
+        }
+
+    share_deposit_example_vnd = int(plat.get("share_deposit_example_vnd", 600000))
 
     win_base = int(plat["win_base"])
     win_default = int(plat["win_default"])
@@ -157,6 +180,8 @@ def load_external_bundles() -> ExternalBundles:
         platform_presets=platform_presets,
         wallet_currency_by_host=wallet_currency_by_host,
         ref_referral_commission_vnd=ref_referral_commission_vnd,
+        commission_amt_vnd=commission_amt_vnd,
+        share_deposit_example_vnd=share_deposit_example_vnd,
         win_base=win_base,
         win_default=win_default,
         win_max=win_max,
