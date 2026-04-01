@@ -1,8 +1,14 @@
 {
-  "version": "1.0.1",
-  "download_url": "https://github.com/Krapy5247/updatetest/releases/download/v1.0.1/test.py",
+  "version": "1.0.2",
+  "download_url": "https://github.com/Krapy5247/updatetest/releases/download/v1.0.2/test.py",
   "sha256": "",
-  "version_info_url": "https://github.com/Krapy5247/updatetest/releases/download/v1.0.1/version_info.py",
+  "version_info_url": "https://github.com/Krapy5247/updatetest/releases/download/v1.0.2/version_info.py",
   "version_info_sha256": "",
-  "extra_files": []
+  "extra_files": [
+  {
+    "path": "data/i18n/zh-tw.json",
+    "url": "https://github.com/Krapy5247/updatetest/releases/download/v1.0.2/zh-tw.json",
+    "sha256": ""
+  }
+]
 }

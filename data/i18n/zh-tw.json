@@ -1,7 +1,7 @@
 {
   "app_title": "Treasure Claw AI Agent",
   "login_prompt_title": "請輸入平台帳號及密碼",
-  "label_account": "帳號：",
+  "label_account": "帳號123：",
   "label_password": "密碼：",
   "btn_login": "登入",
   "label_interface_lang": "介面語言",
