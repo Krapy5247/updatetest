@@ -44,8 +44,6 @@ from external_data import load_external_bundles
 from app_update import check_and_apply_update, get_manifest_url
 
 
-print("test.py 執行中 04011316 git")
-
 _E = load_external_bundles()
 _t = _E.theme
 LOGIN_UI_BG = _t["LOGIN_UI_BG"]
@@ -3346,7 +3344,7 @@ class LoginApp:
 
         def worker() -> None:
             try:
-                status, msg = check_and_apply_update(url)
+                status, msg = check_and_apply_update(root_dir, url)
                 self.root.after(0, lambda: self._check_update_ui_done(status, msg))
             except Exception as e:
                 self.root.after(0, lambda: self._check_update_ui_done("error", str(e)))
@@ -4093,3 +4091,8 @@ if __name__ == "__main__":
     # python -m PyInstaller --noconsole --onefile --clean --name TreasureClaw --add-data "data;data" --icon="data/openclaw.ico" --collect-all selenium test.py
     # → dist\TreasureClaw.exe ；主程式勿加 --uac-admin（Chrome/Selenium 在提權環境易空白分頁）
     # onedir：將 --onefile 改成 --onedir，輸出 dist\TreasureClaw\TreasureClaw.exe
+# cd D:\projet\installBK\autoinstall
+# git add -A
+# git status
+# git commit -m "Sync single-manifest update flow"
+# git push
