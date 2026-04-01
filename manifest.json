@@ -12,17 +12,17 @@
   },
   {
     "path": "data/i18n/vi.json",
-    "url": "https://github.com/Krapy5247/updatetest/releases/download/v1.0.5/vi.json",
+    "url": "https://github.com/Krapy5247/updatetest/releases/download/v1.0.6/vi.json",
     "sha256": ""
   },
   {
     "path": "data/platform.json",
-    "url": "https://github.com/Krapy5247/updatetest/releases/download/v1.0.5/platform.json",
+    "url": "https://github.com/Krapy5247/updatetest/releases/download/v1.0.6/platform.json",
     "sha256": ""
   },
   {
     "path": "external_data.py",
-    "url": "https://github.com/Krapy5247/updatetest/releases/download/v1.0.5/external_data.py",
+    "url": "https://github.com/Krapy5247/updatetest/releases/download/v1.0.6/external_data.py",
     "sha256": ""
   }
 ]
