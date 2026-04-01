@@ -1,0 +1,23 @@
+{
+  "default_platform_key": "vnruby88",
+  "platform_presets": {
+    "vnruby88": {
+      "api_origin": "https://w3.vnruby88.com",
+      "guest_url": "https://w3.vnruby88.com/site/Guest"
+    }
+  },
+  "wallet_currency_by_host": {
+    "w3.vnruby88.com": "VND"
+  },
+  "ref_referral_commission_vnd": {
+    "10": 120000,
+    "30": 160000,
+    "60": 200000,
+    "100": 320000
+  },
+  "win_base": 300000,
+  "win_default": 6000000,
+  "win_max": 60000000,
+  "hope_min": 6000000,
+  "hope_step": 100000
+}

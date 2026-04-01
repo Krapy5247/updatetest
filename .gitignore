@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+.venv/
+env/
+ENV/
+
+# PyInstaller
+/build/
+/dist/
+*.spec.bak
+/TreasureClawLauncher.spec
+
+# Inno Setup 輸出
+/installer_output/

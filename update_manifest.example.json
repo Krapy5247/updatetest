@@ -1,0 +1,7 @@
+{
+  "version": "1.0.1",
+  "download_url": "http://127.0.0.1:8000/releases/test.py",
+  "sha256": "",
+  "version_info_url": "http://127.0.0.1:8000/releases/version_info.py",
+  "version_info_sha256": ""
+}

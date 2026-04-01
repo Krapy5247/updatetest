@@ -1,0 +1,26 @@
+{
+  "grid": [
+    {"ox": -204, "oy": -99, "note": "1"},
+    {"ox": -210, "oy": 0, "note": "2"},
+    {"ox": -212, "oy": 100, "note": "3"},
+    {"ox": -106, "oy": -104, "note": "4"},
+    {"ox": -107, "oy": -2, "note": "5"},
+    {"ox": -106, "oy": 101, "note": "6"},
+    {"ox": -1, "oy": -106, "note": "7"},
+    {"ox": -3, "oy": -1, "note": "8"},
+    {"ox": -1, "oy": 103, "note": "9"},
+    {"ox": 99, "oy": -104, "note": "10"},
+    {"ox": 100, "oy": -1, "note": "11"},
+    {"ox": 100, "oy": 100, "note": "12"},
+    {"ox": 205, "oy": -106, "note": "13"},
+    {"ox": 203, "oy": 1, "note": "14"},
+    {"ox": 205, "oy": 105, "note": "15"}
+  ],
+  "confirm_sequence": [
+    {"ox": 2, "oy": 218, "note": "1"},
+    {"ox": 1, "oy": 228, "note": "2"},
+    {"ox": 0, "oy": 237, "note": "3"}
+  ],
+  "spin_ack_to_jackpot_sweep_delay_sec": 3.0,
+  "in_game_ai_marquee_interval_ms": 5000
+}
