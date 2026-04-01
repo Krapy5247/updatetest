@@ -320,6 +320,27 @@ def apply_extra_files(manifest: dict[str, Any]) -> bool:
                 except OSError:
                     pass
                 return False
+            # 避免 OTA 覆寫成舊版 external_data.py，導致 test.py 無法 import load_external_bundles
+            if rel.name == "external_data.py":
+                try:
+                    text = tmp_path.read_text(encoding="utf-8", errors="replace")
+                except OSError as e:
+                    print(f"[更新] extra_files[{i}] 無法讀取暫存檔: {e}", file=sys.stderr)
+                    try:
+                        tmp_path.unlink(missing_ok=True)
+                    except OSError:
+                        pass
+                    return False
+                if "def load_external_bundles" not in text:
+                    print(
+                        f"[更新] extra_files[{i}] external_data.py 與主程式不相容（缺少 load_external_bundles），已中止覆寫",
+                        file=sys.stderr,
+                    )
+                    try:
+                        tmp_path.unlink(missing_ok=True)
+                    except OSError:
+                        pass
+                    return False
             os.replace(tmp_path, dest)
             print(f"[更新] 已更新 {rel.as_posix()}")
         finally:
