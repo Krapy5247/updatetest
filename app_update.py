@@ -3,7 +3,8 @@
 
 PyInstaller onedir：test.py／version_info.py 的 OTA 覆寫寫入 sys._MEIPASS（_internal），
 與實際載入路徑一致；update_config.json 仍讀 exe 同層 install_root()。
-清單可選 extra_files：以相對路徑下載更多檔案至同一程式目錄（如 data/*.json）。
+清單可選 extra_files：path 以 data/ 開頭者寫入 exe 同層（與 external_data 讀取順序一致）；
+其餘寫入 _MEIPASS。
 
 優先讀取更新清單網址：
   1. 環境變數 UPDATE_MANIFEST_URL
@@ -258,7 +259,7 @@ def apply_update_test_py(manifest: dict[str, Any]) -> bool:
 
 
 def _safe_bundle_relative_path(rel: str) -> Path | None:
-    """僅允許相對路徑寫入 app_bundle_root 之下，阻擋 .. 與絕對路徑。"""
+    """僅允許相對路徑，阻擋 .. 與絕對路徑。實際寫入根目錄由 _extra_files_write_base 決定。"""
     s = (rel or "").strip().replace("\\", "/").lstrip("/")
     if not s:
         return None
@@ -266,6 +267,13 @@ def _safe_bundle_relative_path(rel: str) -> Path | None:
     if ".." in parts:
         return None
     return Path(*parts) if parts else None
+
+
+def _extra_files_write_base(rel: Path) -> Path:
+    """data/ 底下寫入 exe 同層（與 external_data 第一優先一致）；其餘寫 _MEIPASS。"""
+    if rel.parts and str(rel.parts[0]).lower() == "data":
+        return install_root()
+    return app_bundle_root()
 
 
 def apply_extra_files(manifest: dict[str, Any]) -> bool:
@@ -276,8 +284,6 @@ def apply_extra_files(manifest: dict[str, Any]) -> bool:
     if not isinstance(raw, list):
         print("[更新] extra_files 必須為陣列", file=sys.stderr)
         return False
-    br = app_bundle_root()
-    br_resolved = br.resolve()
     for i, item in enumerate(raw):
         if not isinstance(item, dict):
             print(f"[更新] extra_files[{i}] 必須為物件", file=sys.stderr)
@@ -291,11 +297,13 @@ def apply_extra_files(manifest: dict[str, Any]) -> bool:
             print(f"[更新] extra_files[{i}] 缺少 url", file=sys.stderr)
             return False
         expect_hash = str(item.get("sha256") or "").strip().lower()
-        dest = (br / rel).resolve()
+        base = _extra_files_write_base(rel)
+        base_resolved = base.resolve()
+        dest = (base / rel).resolve()
         try:
-            dest.relative_to(br_resolved)
+            dest.relative_to(base_resolved)
         except ValueError:
-            print(f"[更新] extra_files[{i}] path 超出程式目錄", file=sys.stderr)
+            print(f"[更新] extra_files[{i}] path 超出允許目錄", file=sys.stderr)
             return False
         parent = dest.parent
         parent.mkdir(parents=True, exist_ok=True)

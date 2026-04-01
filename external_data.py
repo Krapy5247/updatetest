@@ -1,6 +1,7 @@
 """從 data/ 載入介面翻譯、主題色、平台／金額、座標等外部 JSON。
 
-優先順序：exe／腳本同層的 data/（可讓使用者修改）；若缺檔則嘗試 PyInstaller 內建 _MEIPASS/data/。
+優先順序：exe／腳本同層的 data/（可讓使用者修改；OTA 的 extra_files 亦寫入此處）；
+若缺檔則嘗試 PyInstaller 內建 _MEIPASS/data/。
 """
 from __future__ import annotations
 
