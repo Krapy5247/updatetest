@@ -4092,3 +4092,6 @@ if __name__ == "__main__":
     # python -m PyInstaller --noconsole --onefile --clean --name TreasureClaw --add-data "data;data" --icon="data/openclaw.ico" --collect-all selenium test.py
     # → dist\TreasureClaw.exe ；主程式勿加 --uac-admin（Chrome/Selenium 在提權環境易空白分頁）
     # onedir：將 --onefile 改成 --onedir，輸出 dist\TreasureClaw\TreasureClaw.exe
+
+# git config user.email "Krapy5247@gmail.com"
+# git config user.name "Krapy5247"
