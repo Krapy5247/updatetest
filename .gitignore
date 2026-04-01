@@ -9,11 +9,16 @@ venv/
 env/
 ENV/
 
-# PyInstaller
-/build/
-/dist/
+# PyInstaller（onedir / onefile 產物）
+build/
+dist/
+*.spec
 *.spec.bak
-/TreasureClawLauncher.spec
 
-# Inno Setup 輸出
-/installer_output/
+# Inno Setup 安裝檔輸出
+installer_output/
+
+# 建置過程雜項
+*.egg-info/
+.eggs/
+pip-wheel-metadata/
